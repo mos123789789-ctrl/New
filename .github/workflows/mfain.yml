@@ -1,0 +1,58 @@
+name: CI Ngrok Tunnels Execution
+
+on: [push]
+
+jobs:
+  run-ngrok:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Ngrok Agent
+        run: |
+          curl -s https://amazonaws.com | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt-get update && sudo apt-get install ngrok
+
+      - name: Generate Ngrok Config and Start Tunnels
+        env:
+          NGROK_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          # إنشاء مجلد الإعدادات الافتراضي لـ ngrok
+          mkdir -p ~/.config/ngrok
+
+          # كتابة ملف ngrok.yml ديناميكياً باستخدام السر المشفر
+          cat <<EOF > ~/.config/ngrok/ngrok.yml
+          version: "3"
+          authtoken: $NGROK_TOKEN
+          web_addr: localhost:4040
+          version_check: true
+
+          tunnels:
+            web_app:
+              proto: http
+              addr: 8080
+              schemes:
+                - https
+            api_service:
+              proto: http
+              addr: 3000
+              host_header: rewrite
+            ssh_tunnel:
+              proto: tcp
+              addr: 22
+          EOF
+
+          # تشغيل خادم محلي تجريبي على منفذ 8080 لتجربة النفق
+          python3 -m http.server 8080 &
+
+          # تشغيل جميع الأنفاق المعرفة في ملف الإعدادات بالخلفية
+          ngrok start --all --log=stdout &
+          
+          # الانتظار 5 ثوانٍ حتى يتم توليد الروابط العامة
+          sleep 5
+
+          # استخراج الروابط العامة وعرضها في سجلات تفاصيل الـ GitHub Actions
+          curl -s http://localhost:4040/api/tunnels | jq '.tunnels[].public_url'
+          
